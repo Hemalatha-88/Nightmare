@@ -16,6 +16,7 @@ from groq import Groq
 
 load_dotenv()
 
+
 # ── App ────────────────────────────────────────────────────────────────────────
 app = Flask(__name__)
 
@@ -814,3 +815,9 @@ Return ONLY a valid JSON object:
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+    
+    with app.app_context():
+    # This ensures tables exist, but because the .db file 
+    # is already on the disk from your GitHub push, 
+    # it won't wipe your existing data.
+    db.create_all()
