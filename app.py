@@ -23,7 +23,7 @@ app = Flask(__name__)
 load_dotenv() 
 
 # 2. Configure Mail
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_SERVER'] = '2k23it18@kiot.ac.in'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USERNAME'] = os.getenv('2k23it18@kiot.ac.in')
