@@ -39,22 +39,38 @@ app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_USERNAME')
 mail = Mail(app)
 
-# 5. CORS — exact Vercel URL, no wildcard
-ALLOWED_ORIGINS = [
-    "https://hrms-ai-5.vercel.app",
-    "http://localhost:3000"
-]
+# 5. CORS — reads from environment variable so you never need to redeploy for URL changes
+import re
 
-CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}}, supports_credentials=True)
+def is_allowed_origin(origin):
+    if not origin:
+        return False
+    # Always allow localhost
+    if origin.startswith("http://localhost"):
+        return True
+    # Always allow your stable Vercel production URL
+    if origin == "https://hrms-ai-5.vercel.app":
+        return True
+    # Allow ALL Vercel preview URLs for your project (any deployment)
+    if re.match(r"https://hrms-ai-5-.*\.vercel\.app", origin):
+        return True
+    # Allow any extra origins set in environment variable on Render
+    # In Render dashboard: set ALLOWED_ORIGIN = https://yourcustomdomain.com
+    extra = os.getenv("ALLOWED_ORIGIN", "")
+    if extra and origin == extra:
+        return True
+    return False
+
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.after_request
 def add_cors_headers(response):
     origin = request.headers.get('Origin', '')
-    if origin in ALLOWED_ORIGINS:
+    if is_allowed_origin(origin):
         response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
-    response.headers['Access-Control-Allow-Credentials'] = 'true'
     return response
 
 @app.before_request
