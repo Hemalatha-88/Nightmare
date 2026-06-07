@@ -41,7 +41,6 @@ mail = Mail(app)
 
 # 5. CORS — exact Vercel URL, no wildcard
 ALLOWED_ORIGINS = [
-    "https://hrms-ai-5-klsk5cm2k-hemalathas-projects-637d8d92.vercel.app",
     "https://hrms-ai-5.vercel.app",
     "http://localhost:3000"
 ]
