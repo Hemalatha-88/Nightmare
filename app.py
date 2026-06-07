@@ -34,9 +34,9 @@ db = SQLAlchemy(app)
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.getenv('2k23it18@kiot.ac.in')
-app.config['MAIL_PASSWORD'] = os.getenv('yvim ckvi cfgm chwf')
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('2k23it18@kiot.ac.in')
+app.config['MAIL_USERNAME'] = "2k23it18@kiot.ac.in"
+app.config['MAIL_PASSWORD'] = "yvim ckvi cfgm chwf"
+app.config['MAIL_DEFAULT_SENDER'] = "2k23it18@kiot.ac.in" 
 mail = Mail(app)
 
 # 5. CORS — reads from environment variable so you never need to redeploy for URL changes
