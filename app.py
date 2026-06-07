@@ -21,7 +21,12 @@ load_dotenv()
 app = Flask(__name__)
 
 # ── Database ───────────────────────────────────────────────────────────────────
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///new_employeess.db"
+# On Render, DATABASE_URL is set automatically for PostgreSQL add-ons.
+# Render uses "postgres://" prefix which SQLAlchemy requires as "postgresql://".
+_db_url = os.environ.get("DATABASE_URL", "sqlite:///new_employeess.db")
+if _db_url.startswith("postgres://"):
+    _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+app.config["SQLALCHEMY_DATABASE_URI"] = _db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
@@ -815,9 +820,3 @@ Return ONLY a valid JSON object:
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-    
-    with app.app_context():
-    # This ensures tables exist, but because the .db file 
-    # is already on the disk from your GitHub push, 
-    # it won't wipe your existing data.
-    db.create_all()
