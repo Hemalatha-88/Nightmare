@@ -26,23 +26,28 @@ load_dotenv()
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_USERNAME')
+app.config['MAIL_USERNAME'] = os.getenv('2k23it18@kiot.ac.in')
+app.config['MAIL_PASSWORD'] = os.getenv('yvim ckvi cfgm chwf')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('2k23it18@kiot.ac.in')
 
 # 3. Initialize Mail extension
 mail = Mail(app)
 
 # 4. Configure CORS
-CORS(app, resources={
-    r"/*": {
-        "origins": [
-            "https://hrms-ai-5.vercel.app",
-            "https://hrms-ai-5-git-main-hemalathas-projects-637d8d92.vercel.app",
-            "https://hrms-ai-5-loh7gmvk3-hemalathas-projects-637d8d92.vercel.app"
-        ]
-    }
-}, supports_credentials=True)
+# 4. Configure CORS
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
+@app.before_request
+def handle_options():
+    if request.method == 'OPTIONS':
+        return '', 200
 
 
 # ... Proceed with your other configs (Database, Groq, etc.) ...
