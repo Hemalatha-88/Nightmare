@@ -446,8 +446,8 @@ def extract_resume():
             role=p.get("role", "Not Listed"),
             experience=p.get("experience", "Not Listed"),
             skills=",".join(p.get("skills", [])) if isinstance(p.get("skills"), list) else str(p.get("skills", "")),
-            education=p.get("education", "Not Listed"),
-            previous_company=p.get("previousCompany", "Not Listed"),
+            education=p.get("education", "Not Listed") if isinstance(p.get("education"), str) else p.get("education", {}).get("degree", "Not Listed"),
+            previous_company=p.get("previousCompany", "Not Listed") if isinstance(p.get("previousCompany"), str) else p.get("previousCompany", {}).get("organization", "Not Listed"),
             salary=p.get("salary", "Negotiable"),
             summary=p.get("summary", "")
         )
