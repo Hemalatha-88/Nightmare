@@ -22,8 +22,26 @@ import datetime
 app = Flask(__name__)
 load_dotenv() 
 
+
+db = SQLAlchemy(app)
+
+# --- CRITICAL FIX: MOVE THIS OUTSIDE OF THE IF BLOCK ---
+with app.app_context():
+    db.create_all()
+    # Check if we need to seed the data
+    job_count = db.session.execute(db.select(db.func.count(Job.id))).scalar()
+    if job_count == 0:
+        db.session.add(Job(
+            role="Senior Frontend Developer", 
+            must_have="React, TypeScript, 3+ years experience", 
+            nice_to_have="AWS, GraphQL, Team leadership", 
+            budget_max="25 LPA"
+        ))
+        db.session.commit()
+        print("Database tables created and seeded.")
+
 # 2. Configure Mail
-app.config['MAIL_SERVER'] = '2k23it18@kiot.ac.in'
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USERNAME'] = os.getenv('2k23it18@kiot.ac.in')
@@ -794,18 +812,5 @@ def health_check():
 # Create Database & Run App
 # -----------------------------
 if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
-        job_count = db.session.execute(db.select(db.func.count(Job.id))).scalar()
-        if job_count == 0:
-            db.session.add(Job(
-                role="Senior Frontend Developer", 
-                must_have="React, TypeScript, 3+ years experience", 
-                nice_to_have="AWS, GraphQL, Team leadership", 
-                budget_max="25 LPA"
-            ))
-            db.session.commit()
-    
-    # Run without debug=True for production
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
