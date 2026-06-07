@@ -5,10 +5,11 @@ import json
 import secrets
 import traceback
 import re
+import urllib.request
+import urllib.error
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from flask_mail import Mail, Message
 from werkzeug.security import generate_password_hash, check_password_hash
 from pypdf import PdfReader
 from docx import Document
@@ -25,16 +26,32 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///new_employeess.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
-# ── Mail  (port 465 + SSL — most reliable on Render) ──────────────────────────
-app.config['MAIL_SERVER']         = 'smtp.gmail.com'
-app.config['MAIL_PORT']           = 465
-app.config['MAIL_USE_TLS']        = False
-app.config['MAIL_USE_SSL']        = True
-app.config['MAIL_USERNAME']       = os.getenv('MAIL_USERNAME', '2k23it18@kiot.ac.in')
-app.config['MAIL_PASSWORD']       = os.getenv('MAIL_PASSWORD', 'yvim ckvi cfgm chwf')
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_USERNAME', '2k23it18@kiot.ac.in')
-app.config['MAIL_TIMEOUT']        = 10
-mail = Mail(app)
+# ── Email via Resend HTTP API (no SMTP — works on Render free tier) ────────────
+RESEND_API_KEY   = os.getenv("RESEND_API_KEY", "")
+MAIL_FROM        = os.getenv("MAIL_FROM", "onboarding@resend.dev")   # use resend.dev until you verify a domain
+
+def send_email(to_address: str, subject: str, body: str) -> None:
+    """Send email via Resend REST API. Raises on failure."""
+    if not RESEND_API_KEY:
+        raise RuntimeError("RESEND_API_KEY environment variable is not set.")
+    payload = json.dumps({
+        "from":    MAIL_FROM,
+        "to":      [to_address],
+        "subject": subject,
+        "text":    body
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data    = payload,
+        headers = {
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type":  "application/json"
+        },
+        method  = "POST"
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        if resp.status not in (200, 201):
+            raise RuntimeError(f"Resend API returned status {resp.status}")
 
 # ── CORS ───────────────────────────────────────────────────────────────────────
 def is_allowed_origin(origin):
@@ -230,12 +247,11 @@ def home():
 @app.route("/test-mail")
 def test_mail():
     try:
-        msg = Message(
-            "SMTP Test",
-            recipients=[app.config['MAIL_USERNAME']],
-            body="SMTP is working correctly from Render!"
+        send_email(
+            to_address = os.getenv("MAIL_FROM", "onboarding@resend.dev"),
+            subject    = "SMTP Test",
+            body       = "Email via Resend is working correctly from Render!"
         )
-        mail.send(msg)
         return jsonify({"status": "Email sent successfully!"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -637,11 +653,10 @@ def accept_candidate(candidate_id):
     interview_url = f"{FRONTEND_URL}/interview/{candidate.interview_token}"
 
     try:
-        msg = Message(
-            subject   = f"Technical Assessment Invitation - {candidate.role or 'Open Position'}",
-            recipients= [target_email],
-            sender    = app.config.get('MAIL_DEFAULT_SENDER'),
-            body      = f"""Dear {candidate.name},
+        send_email(
+            to_address = target_email,
+            subject    = f"Technical Assessment Invitation - {candidate.role or 'Open Position'}",
+            body       = f"""Dear {candidate.name},
 
 Congratulations! The hiring team has moved your profile forward for the {candidate.role or 'open'} position.
 
@@ -651,10 +666,7 @@ Please use the secure link below to start your AI technical assessment:
 Best regards,
 HR Operations Team"""
         )
-        mail.send(msg)
-
     except Exception as email_err:
-        # Roll back the status change so HR knows to retry
         candidate.interview_status = "Pending"
         db.session.commit()
         return jsonify({"error": f"Email failed: {str(email_err)}"}), 500
