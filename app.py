@@ -2,7 +2,7 @@ import os
 import sys
 import io
 import json
-import secrets 
+import secrets
 import traceback
 from pathlib import Path
 from flask import Flask, jsonify, request
@@ -18,48 +18,44 @@ import random
 import jwt
 import datetime
 
+load_dotenv()
+
 # 1. Initialize app ONCE
 app = Flask(__name__)
-load_dotenv() 
 
+# 2. Configure Database
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///new_employeess.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+# 3. Initialize db ONCE (here, before models)
 db = SQLAlchemy(app)
 
-# --- CRITICAL FIX: MOVE THIS OUTSIDE OF THE IF BLOCK ---
-with app.app_context():
-    db.create_all()
-    # Check if we need to seed the data
-    job_count = db.session.execute(db.select(db.func.count(Job.id))).scalar()
-    if job_count == 0:
-        db.session.add(Job(
-            role="Senior Frontend Developer", 
-            must_have="React, TypeScript, 3+ years experience", 
-            nice_to_have="AWS, GraphQL, Team leadership", 
-            budget_max="25 LPA"
-        ))
-        db.session.commit()
-        print("Database tables created and seeded.")
-
-# 2. Configure Mail
+# 4. Configure Mail
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.getenv('2k23it18@kiot.ac.in')
-app.config['MAIL_PASSWORD'] = os.getenv('yvim ckvi cfgm chwf')
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('2k23it18@kiot.ac.in')
-
-# 3. Initialize Mail extension
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_USERNAME')
 mail = Mail(app)
 
-# 4. Configure CORS
-# 4. Configure CORS
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+# 5. CORS — exact Vercel URL, no wildcard
+ALLOWED_ORIGINS = [
+    "https://hrms-ai-5-klsk5cm2k-hemalathas-projects-637d8d92.vercel.app",
+    "https://hrms-ai-5.vercel.app",
+    "http://localhost:3000"
+]
+
+CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}}, supports_credentials=True)
 
 @app.after_request
 def add_cors_headers(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    origin = request.headers.get('Origin', '')
+    if origin in ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin'] = origin
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
     return response
 
 @app.before_request
@@ -67,23 +63,17 @@ def handle_options():
     if request.method == 'OPTIONS':
         return '', 200
 
-
-# ... Proceed with your other configs (Database, Groq, etc.) ...
-# -----------------------------
-# SQLite Database Setup
-# -----------------------------
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///new_employeess.db"
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-db = SQLAlchemy(app)
+# 6. Groq client
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 # -----------------------------
-# DATABASE TABLES FOR PERSISTENCE
+# DATABASE MODELS
 # -----------------------------
 class Job(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     role = db.Column(db.String(100), nullable=False)
-    must_have = db.Column(db.Text, nullable=False)       
-    nice_to_have = db.Column(db.Text, nullable=True)     
+    must_have = db.Column(db.Text, nullable=False)
+    nice_to_have = db.Column(db.Text, nullable=True)
     budget_max = db.Column(db.String(50), nullable=False)
     candidates = db.relationship('Candidate', backref='job', cascade='all, delete-orphan', lazy=True)
 
@@ -110,11 +100,11 @@ class Candidate(db.Model):
     summary = db.Column(db.Text)
     score = db.Column(db.Integer, default=None)
     recommendation = db.Column(db.String(50), default=None)
-    strengths = db.Column(db.Text, default=None)         
-    concerns = db.Column(db.Text, default=None)          
+    strengths = db.Column(db.Text, default=None)
+    concerns = db.Column(db.Text, default=None)
     salary_fit = db.Column(db.String(50), default=None)
     rank = db.Column(db.Integer, default=None)
-    interview_status = db.Column(db.String(50), default="Pending") 
+    interview_status = db.Column(db.String(50), default="Pending")
     interview_token = db.Column(db.String(100), unique=True, nullable=True)
     ai_interview_score = db.Column(db.Integer, default=None)
     ai_interview_feedback = db.Column(db.Text, default=None)
@@ -148,16 +138,15 @@ class Employee(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     department = db.Column(db.String(100), nullable=False)
-    role = db.Column(db.String(100), nullable=False)        
+    role = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(100), unique=True, nullable=False)
-    password_hash = db.Column(db.String(200), nullable=False) 
+    password_hash = db.Column(db.String(200), nullable=False)
     salary = db.Column(db.String(50))
     experience = db.Column(db.String(50))
     skills = db.Column(db.String(300))
     status = db.Column(db.String(50), default="Active")
 
     def to_dict(self):
-        # FIX: Explicit fallbacks for fields to avoid JS 'undefined' errors
         return {
             "id": self.id,
             "name": self.name or "Unnamed Position",
@@ -166,10 +155,23 @@ class Employee(db.Model):
             "email": self.email or "",
             "salary": self.salary or "Not Disclosed",
             "experience": self.experience or "0 years",
-            "skills": self.skills or "", # Handled safely as string with safe defaults
+            "skills": self.skills or "",
             "status": self.status or "Active",
         }
 
+# 7. Create tables and seed AFTER models are defined
+with app.app_context():
+    db.create_all()
+    job_count = db.session.execute(db.select(db.func.count(Job.id))).scalar()
+    if job_count == 0:
+        db.session.add(Job(
+            role="Senior Frontend Developer",
+            must_have="React, TypeScript, 3+ years experience",
+            nice_to_have="AWS, GraphQL, Team leadership",
+            budget_max="25 LPA"
+        ))
+        db.session.commit()
+        print("Database tables created and seeded.")
 
 # -----------------------------
 # Groq Core API Client Handler
@@ -187,11 +189,11 @@ def call_groq_api(prompt):
         return None
 
 # -----------------------------
-# Home Route
+# Home / Health Check
 # -----------------------------
-@app.route("/")
+@app.route("/", methods=["GET", "HEAD"])
 def home():
-    return jsonify({"message": "HR AI Backend Running via Groq Cloud Support"})
+    return jsonify({"status": "healthy", "message": "HR AI Backend Running via Groq Cloud Support"}), 200
 
 # -----------------------------
 # AUTHENTICATION ENDPOINTS
@@ -201,7 +203,7 @@ def register_user():
     data = request.json or {}
     email = data.get("email", "").strip().lower()
     password = data.get("password")
-    role = data.get("role", "employee") 
+    role = data.get("role", "employee")
     name = data.get("name", "New Account User")
     department = data.get("department", "General Staff Operations")
 
@@ -245,23 +247,25 @@ def login_user():
             "email": user_record.email,
             "name": user_record.name
         }), 200
-    return jsonify({"error": "Invalid email address or signature credentials match"}), 401
+    return jsonify({"error": "Invalid email address or password"}), 401
 
+# -----------------------------
+# EMPLOYEE ENDPOINTS
+# -----------------------------
 @app.route("/employees", methods=["GET", "POST", "OPTIONS"])
 def manage_employees():
     if request.method == "OPTIONS":
         return jsonify({"status": "ok"}), 200
-        
+
     if request.method == "POST":
         data = request.json or {}
         email_clean = data.get("email", "").strip().lower()
         if not email_clean:
             return jsonify({"error": "Employee email parameter is completely empty."}), 400
-            
-        # Check duplicate emails to avoid unhandled SQLite unique failure crashes
+
         existing = db.session.execute(db.select(Employee).filter_by(email=email_clean)).scalars().first()
         if existing:
-            return jsonify({"error": "An employee node with this email address already exists."}), 400
+            return jsonify({"error": "An employee with this email already exists."}), 400
 
         default_hashed = generate_password_hash("password123")
         employee = Employee(
@@ -269,7 +273,7 @@ def manage_employees():
             department=data.get("department", "Engineering"),
             role=data.get("role", "Associate Staff"),
             email=email_clean,
-            password_hash=default_hashed, 
+            password_hash=default_hashed,
             salary=data.get("salary", "N/A"),
             experience=data.get("experience", "0 years"),
             skills=data.get("skills", ""),
@@ -278,7 +282,7 @@ def manage_employees():
         db.session.add(employee)
         db.session.commit()
         return jsonify({"message": "Employee added successfully", "employee": employee.to_dict()}), 201
-    
+
     employees = db.session.execute(db.select(Employee)).scalars().all()
     return jsonify([e.to_dict() for e in employees]), 200
 
@@ -293,20 +297,8 @@ def delete_employee(id):
     db.session.commit()
     return jsonify({"message": "Employee deleted successfully"}), 200
 
-@app.route("/employees", methods=["GET"])
-def get_employees():
-    employees = Employee.query.all()
-    # Ensure this returns a list of dictionaries
-    return jsonify([
-        {
-            "id": e.id, 
-            "name": e.name, 
-            "department": getattr(e, 'department', 'N/A')
-        } for e in employees
-    ])
-
 # -----------------------------
-# DYNAMIC MULTI-JOB ENDPOINTS
+# JOB ENDPOINTS
 # -----------------------------
 @app.route("/jobs", methods=["GET", "POST"])
 def manage_jobs():
@@ -321,7 +313,7 @@ def manage_jobs():
         db.session.add(job)
         db.session.commit()
         return jsonify(job.to_dict()), 201
-    
+
     jobs = db.session.execute(db.select(Job)).scalars().all()
     return jsonify([j.to_dict() for j in jobs])
 
@@ -357,7 +349,7 @@ def get_job_candidates(job_id):
     return jsonify([c.to_dict() for c in candidates])
 
 # -----------------------------
-# INTERFACE PIPELINES
+# RESUME ENDPOINTS
 # -----------------------------
 @app.route("/extract-resume", methods=["POST", "OPTIONS"])
 def extract_resume():
@@ -371,8 +363,7 @@ def extract_resume():
     file = request.files['file']
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
-    
-    raw_text = ""
+
     filename = file.filename.lower()
     try:
         file_bytes = file.read()
@@ -396,12 +387,12 @@ def extract_resume():
         else:
             return jsonify({"error": "Unsupported file format. Please upload .pdf, .docx, or .txt"}), 400
     except Exception as parse_error:
-        print("--- EXTRACT RESUME PARSING EXCEPTION DETECTED ---", file=sys.stderr)
+        print("--- EXTRACT RESUME PARSING EXCEPTION ---", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
-        return jsonify({"error": f"Document compilation parsing failure: {str(parse_error)}"}), 500
+        return jsonify({"error": f"Document parsing failure: {str(parse_error)}"}), 500
 
     if not raw_text or len(raw_text.strip()) < 5:
-        return jsonify({"error": "Could not extract clear structural text. Ensure document is not scanned/image-only."}), 400
+        return jsonify({"error": "Could not extract text. Ensure document is not scanned/image-only."}), 400
 
     prompt = f"""
     You are an AI document parsing engine. Analyze the following extracted text from a candidate's resume and extract their personal profile attributes.
@@ -421,7 +412,7 @@ def extract_resume():
     """
     response_text = call_groq_api(prompt)
     if not response_text:
-        return jsonify({"error": "Failed to extract candidate profile using Groq processing service."}), 500
+        return jsonify({"error": "Failed to extract candidate profile using Groq."}), 500
 
     try:
         response_text = response_text.strip()
@@ -449,7 +440,7 @@ def extract_resume():
         db.session.commit()
         return jsonify(candidate.to_dict()), 200
     except Exception as e:
-        print("--- EXTRACT RESUME PROCESSING EXCEPTION DETECTED ---", file=sys.stderr)
+        print("--- EXTRACT RESUME PROCESSING EXCEPTION ---", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         return jsonify({"error": f"Profile Extraction Exception: {str(e)}"}), 500
 
@@ -465,7 +456,7 @@ def resume_analysis():
         job = db.session.get(Job, job_id)
         if not job:
             return jsonify({"error": "Job profile not found"}), 404
-        
+
         candidates = db.session.execute(db.select(Candidate).filter_by(job_id=job_id)).scalars().all()
         if not candidates:
             return jsonify({"error": "No active candidates found for this job position"}), 400
@@ -474,7 +465,7 @@ def resume_analysis():
             f"Candidate ID {c.id}: {c.name}\n"
             f"- Current Role: {c.role if c.role else 'Not Listed'}\n"
             f"- Experience: {c.experience if c.experience else 'Not Listed'}\n"
-            f"- Skills: {c.skills if c.skills else 'NoneListed'}\n"
+            f"- Skills: {c.skills if c.skills else 'None Listed'}\n"
             f"- Expected Salary: {c.salary if c.salary else 'Negotiable'}\n"
             f"- Summary: {c.summary if c.summary else ''}"
             for c in candidates
@@ -496,11 +487,11 @@ def resume_analysis():
         - concerns (array of 1-2 short strings, empty array if none)
         - salaryFit (one of: "Within Budget", "Above Budget", "Well Within Budget")
         - rank (integer where 1 represents the absolute best match)
-        Respond ONLY with a valid plain text JSON array. Do not include markdown wraps, code block identifiers, backticks, or text outside the array.
+        Respond ONLY with a valid plain text JSON array. Do not include markdown or backticks.
         """
         response_text = call_groq_api(prompt)
         if not response_text:
-            return jsonify({"error": "Failed to score candidates using Groq processing service."}), 500
+            return jsonify({"error": "Failed to score candidates using Groq."}), 500
 
         response_text = response_text.strip()
         if response_text.startswith("```"):
@@ -519,7 +510,7 @@ def resume_analysis():
             if start_index != -1 and end_index != 0:
                 eval_results = json.loads(response_text[start_index:end_index])
             else:
-                raise ValueError("The generated text did not contain a readable JSON matrix array.")
+                raise ValueError("The generated text did not contain a readable JSON array.")
 
         if isinstance(eval_results, dict):
             for key, val in eval_results.items():
@@ -528,7 +519,7 @@ def resume_analysis():
                     break
 
         if not isinstance(eval_results, list):
-            raise ValueError("The processed AI structure could not be normalized into a candidate evaluation list.")
+            raise ValueError("AI structure could not be normalized into a candidate evaluation list.")
 
         for item in eval_results:
             if not isinstance(item, dict):
@@ -549,13 +540,31 @@ def resume_analysis():
         return jsonify([cand.to_dict() for cand in fresh_candidates])
     except Exception as e:
         db.session.rollback()
-        print("--- RESUME ANALYSIS EXCEPTION DETECTED ---", file=sys.stderr)
+        print("--- RESUME ANALYSIS EXCEPTION ---", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         return jsonify({"error": f"Groq Processing Exception: {str(e)}"}), 500
 
 # -----------------------------
-# AUTOMATED AI INTERVIEW WORKFLOW ENDPOINTS
+# AI INTERVIEW ENDPOINTS
 # -----------------------------
+CONVERSATION_HISTORY = {}
+
+def generate_ai_response(candidate_name, role, skills, history):
+    if len(history) == 0:
+        return f"Hello {candidate_name}, welcome to your automated interview for the {role} position. Let's start with your background. Can you explain your experience working with {skills[0] if skills else 'core technologies'}?"
+
+    last_answer = history[-1].get("answer", "").lower()
+    if "error" in last_answer or "exception" in last_answer:
+        return "That's an interesting approach to error handling. How do you ensure resource clean-up or rollback state when those exceptions occur?"
+    elif "react" in last_answer or "frontend" in last_answer or "state" in last_answer:
+        return "Got it. When handling state architecture in production, how do you optimize rendering performance?"
+    elif len(history) == 1:
+        return "Great. Looking at the required stack components, how do you handle security or concurrent transactions?"
+    elif len(history) == 2:
+        return "Can you describe a challenging technical architectural bug you encountered recently and exactly how you debugged it?"
+    else:
+        return "CONCLUDE_INTERVIEW"
+
 @app.route("/candidates/<int:candidate_id>/accept", methods=["POST"])
 def accept_candidate(candidate_id):
     candidate = db.session.get(Candidate, candidate_id)
@@ -568,15 +577,13 @@ def accept_candidate(candidate_id):
 
     if not candidate.interview_token:
         candidate.interview_token = secrets.token_urlsafe(32)
-    
+
     candidate.interview_status = "Invited"
     db.session.commit()
 
-    # CORRECTED: Use a key (string) for getenv, not the URL itself
-    # Default to the Vercel URL, but allow overrides via environment variables
     FRONTEND_URL = os.getenv("FRONTEND_URL", "https://hrms-ai-5.vercel.app")
     interview_url = f"{FRONTEND_URL}/interview/{candidate.interview_token}"
-    
+
     try:
         msg = Message(
             subject=f"Technical Assessment Invitation - {candidate.role}",
@@ -593,7 +600,7 @@ Best regards,
 HR Operations Team"""
         )
         mail.send(msg)
-        
+
     except Exception as email_err:
         db.session.rollback()
         candidate.interview_status = "Pending"
@@ -605,34 +612,17 @@ HR Operations Team"""
         "candidate": candidate.to_dict(),
         "interviewLink": interview_url
     }), 200
-CONVERSATION_HISTORY = {}
-
-def generate_ai_response(candidate_name, role, skills, history):
-    if len(history) == 0:
-        return f"Hello {candidate_name}, welcome to your automated interview for the {role} position. Let's start with your background. Can you explain your experience working with {skills[0] if skills else 'core technologies'}?"
-    
-    last_answer = history[-1].get("answer", "").lower()
-    if "error" in last_answer or "exception" in last_answer:
-        return "That's an interesting approach to error handling. How do you ensure resource clean-up or rollback state when those exceptions occur?"
-    elif "react" in last_answer or "frontend" in last_answer or "state" in last_answer:
-        return "Got it. When handling state architecture in production, how do you optimize rendering performance?"
-    elif len(history) == 1:
-        return "Great. Looking at the required stack components, how do you handle security or concurrent transactions?"
-    elif len(history) == 2:
-        return "Can you describe a challenging technical architectural bug you encountered recently and exactly how you debugged it?"
-    else:
-        return "CONCLUDE_INTERVIEW"
 
 @app.route("/interview/<string:token>/start", methods=["GET"])
 def start_interview_session(token):
     candidate = Candidate.query.filter_by(interview_token=token).first()
     if not candidate:
         return jsonify({"error": "Invalid or expired interview token."}), 404
-        
+
     skills = [s.strip() for s in candidate.skills.split(",") if s.strip()] if candidate.skills else []
     if token not in CONVERSATION_HISTORY:
         CONVERSATION_HISTORY[token] = []
-        
+
     initial_question = generate_ai_response(candidate.name, candidate.role, skills, CONVERSATION_HISTORY[token])
     return jsonify({
         "candidateName": candidate.name,
@@ -646,64 +636,64 @@ def process_interview_turn(token):
     candidate = Candidate.query.filter_by(interview_token=token).first()
     if not candidate:
         return jsonify({"error": "Candidate token failure."}), 404
-        
+
     data = request.json or {}
     question_asked = data.get("question")
     candidate_answer = data.get("answer")
-    
+
     if not candidate_answer:
-        return jsonify({"error": "No answer speech transcript processed."}), 400
-        
+        return jsonify({"error": "No answer transcript processed."}), 400
+
     if token not in CONVERSATION_HISTORY:
         CONVERSATION_HISTORY[token] = []
-        
+
     CONVERSATION_HISTORY[token].append({
         "question": question_asked,
         "answer": candidate_answer
     })
-    
+
     skills = [s.strip() for s in candidate.skills.split(",") if s.strip()] if candidate.skills else []
     next_question = generate_ai_response(candidate.name, candidate.role, skills, CONVERSATION_HISTORY[token])
-    
+
     if next_question == "CONCLUDE_INTERVIEW":
         total_words = sum(len(turn["answer"].split()) for turn in CONVERSATION_HISTORY[token])
-        calculated_score = min(60 + (total_words // 5), 98) 
-        
+        calculated_score = min(60 + (total_words // 5), 98)
+
         ai_feedback = f"Candidate successfully completed a real-time voice screening session across {len(CONVERSATION_HISTORY[token])} conversational rounds."
-        
+
         candidate.ai_interview_score = calculated_score
         candidate.ai_interview_feedback = ai_feedback
         candidate.interview_status = "Completed"
         db.session.commit()
-        
+
         return jsonify({
             "status": "Completed",
             "message": "Interview completed successfully.",
             "score": calculated_score,
             "feedback": ai_feedback
         }), 200
-        
+
     return jsonify({
         "status": "Ongoing",
         "nextQuestion": next_question
     }), 200
 
+# -----------------------------
+# AI ANALYSIS ENDPOINTS
+# -----------------------------
 @app.route("/analyze-skills", methods=["POST", "OPTIONS"])
 def analyze_skills_realtime():
     if request.method == "OPTIONS":
         return jsonify({"status": "ok"}), 200
-        
+
     try:
-        # 1. Fetch real-time employee data straight from SQLite
         employees = db.session.execute(db.select(Employee)).scalars().all()
-        
+
         if not employees:
             return jsonify({"error": "Your employee database is currently empty. Add users first!"}), 400
-            
-        # 2. Serialize real records for the context payload
+
         employee_dataset = [e.to_dict() for e in employees]
 
-        # 3. Create a strict prompt for Groq's JSON mode
         prompt = f"""
         You are an advanced corporate skills inventory auditor.
         Task: Identify 2-3 specific missing technical skill gaps and assign an urgency level ('High', 'Medium', 'Low') for each employee based on their current role and department.
@@ -721,16 +711,13 @@ def analyze_skills_realtime():
         {json.dumps(employee_dataset)}
         """
 
-        # 4. Request compilation from Llama through Groq
         raw_ai_response = call_groq_api(prompt)
 
         if not raw_ai_response:
             return jsonify({"error": "Groq failed to compile workforce data"}), 500
 
-        # 5. Parse string to ensure it is valid structural JSON, then deliver
         parsed_payload = json.loads(raw_ai_response)
-        
-        # Check if Groq nested it under an outer object or array key
+
         if "results" in parsed_payload:
             return jsonify(parsed_payload["results"]), 200
         return jsonify(parsed_payload), 200
@@ -744,72 +731,62 @@ def analyze_skills_realtime():
 def forecast_bridge():
     if request.method == "OPTIONS":
         return '', 200
-        
+
     try:
         data = request.json
         prompt = f"""Analyze these employees: {json.dumps(data)}. 
         Return ONLY a JSON array with these keys: department, current, required, gap.
         Example: [{{"department": "Engineering", "current": 10, "required": 12, "gap": 2}}]
         No markdown, no conversation."""
-        
+
         chat_completion = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.1-8b-instant"
         )
-        
+
         content = chat_completion.choices[0].message.content.strip()
-        
-        # ADD THIS: Print the raw content to your terminal so we can see what the AI is sending
         print(f"DEBUG AI RESPONSE: {content}")
-        
-        # Clean up
+
         if "```" in content:
             content = content.split("```")[1].replace("json", "").strip()
-            
+
         return jsonify(json.loads(content))
-        
+
     except Exception as e:
         print(f"CRITICAL ERROR: {e}")
-        # Return a MOCK data response so the UI works even if AI fails
         return jsonify([
             {"department": "Engineering", "current": 5, "required": 6, "gap": 1},
             {"department": "Sales", "current": 3, "required": 5, "gap": 2}
         ])
 
-@app.route('/attrition-bridge', methods=['POST'])
+@app.route('/attrition-bridge', methods=['POST', 'OPTIONS'])
 def attrition_bridge():
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
+
     employees = request.json
-    
+
     prompt = f"""Analyze these employees for attrition risk: {json.dumps(employees)}. 
     Return ONLY a valid JSON object in this format: 
     {{ "results": [ {{ "name": "...", "riskLevel": "...", "riskScore": 80, "primaryReasons": [], "retentionActions": [], "replacementCost": "$...", "timeToLeave": "..." }} ] }}"""
-    
-    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-    
+
     try:
-        completion = client.chat.completions.create(
+        completion = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             response_format={"type": "json_object"}
         )
-        
+
         content = json.loads(completion.choices[0].message.content)
-        
-        # Explicitly extract the list from the "results" key
         results_list = content.get("results", [])
         return jsonify(results_list)
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
-    # ADD THIS TO PREVENT RENDER FROM KILLING YOUR APP
-@app.route("/", methods=["GET", "HEAD"])
-def health_check():
-    return jsonify({"status": "healthy"}), 200
-    
+
 # -----------------------------
-# Create Database & Run App
+# Run App
 # -----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
