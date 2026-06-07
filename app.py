@@ -30,13 +30,15 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 # 3. Initialize db ONCE (here, before models)
 db = SQLAlchemy(app)
 
-# 4. Configure Mail
+# 4. Configure Mail — port 465 + SSL (more reliable on Render than 587/STARTTLS)
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = "2k23it18@kiot.ac.in"
-app.config['MAIL_PASSWORD'] = "yvim ckvi cfgm chwf"
-app.config['MAIL_DEFAULT_SENDER'] = "2k23it18@kiot.ac.in" 
+app.config['MAIL_PORT'] = 465
+app.config['MAIL_USE_TLS'] = False
+app.config['MAIL_USE_SSL'] = True
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME', '2k23it18@kiot.ac.in')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD', 'yvim ckvi cfgm chwf')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_USERNAME', '2k23it18@kiot.ac.in')
+app.config['MAIL_TIMEOUT'] = 10
 mail = Mail(app)
 
 # 5. CORS — reads from environment variable so you never need to redeploy for URL changes
@@ -209,6 +211,18 @@ def call_groq_api(prompt):
 @app.route("/", methods=["GET", "HEAD"])
 def home():
     return jsonify({"status": "healthy", "message": "HR AI Backend Running via Groq Cloud Support"}), 200
+
+# -----------------------------
+# SMTP TEST ENDPOINT (debug — remove after confirming email works)
+# -----------------------------
+@app.route("/test-mail")
+def test_mail():
+    try:
+        msg = Message("SMTP Test", recipients=[app.config['MAIL_USERNAME']], body="SMTP is working correctly!")
+        mail.send(msg)
+        return jsonify({"status": "Email sent successfully!"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # -----------------------------
 # AUTHENTICATION ENDPOINTS
