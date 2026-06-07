@@ -5,8 +5,6 @@ import json
 import secrets
 import traceback
 import re
-import urllib.request
-import urllib.error
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -26,32 +24,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///new_employeess.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
-# ── Email via Resend HTTP API (no SMTP — works on Render free tier) ────────────
-RESEND_API_KEY   = os.getenv("RESEND_API_KEY", "")
-MAIL_FROM        = os.getenv("MAIL_FROM", "onboarding@resend.dev")   # use resend.dev until you verify a domain
 
-def send_email(to_address: str, subject: str, body: str) -> None:
-    """Send email via Resend REST API. Raises on failure."""
-    if not RESEND_API_KEY:
-        raise RuntimeError("RESEND_API_KEY environment variable is not set.")
-    payload = json.dumps({
-        "from":    MAIL_FROM,
-        "to":      [to_address],
-        "subject": subject,
-        "text":    body
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data    = payload,
-        headers = {
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type":  "application/json"
-        },
-        method  = "POST"
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        if resp.status not in (200, 201):
-            raise RuntimeError(f"Resend API returned status {resp.status}")
 
 # ── CORS ───────────────────────────────────────────────────────────────────────
 def is_allowed_origin(origin):
@@ -243,18 +216,7 @@ with app.app_context():
 def home():
     return jsonify({"status": "healthy", "message": "HR AI Backend Running"}), 200
 
-# ── SMTP test (hit /test-mail in browser to verify email works after deploy) ───
-@app.route("/test-mail")
-def test_mail():
-    try:
-        send_email(
-            to_address = os.getenv("MAIL_FROM", "onboarding@resend.dev"),
-            subject    = "SMTP Test",
-            body       = "Email via Resend is working correctly from Render!"
-        )
-        return jsonify({"status": "Email sent successfully!"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # AUTH ENDPOINTS
@@ -639,42 +601,47 @@ def accept_candidate(candidate_id):
     if not candidate:
         return jsonify({"error": "Candidate not found"}), 404
 
-    target_email = str(candidate.email).strip() if candidate.email else ""
-    if not target_email or "@" not in target_email:
-        return jsonify({"error": "Candidate has no valid email address"}), 400
+    # Check if already hired
+    existing = db.session.execute(
+        db.select(Employee).filter_by(email=candidate.email)
+    ).scalars().first()
 
-    if not candidate.interview_token:
-        candidate.interview_token = secrets.token_urlsafe(32)
+    if not existing:
+        # Add candidate directly to employees
+        new_employee = Employee(
+            name          = candidate.name or "Unnamed",
+            department    = "New Hire",
+            role          = candidate.role or "Employee",
+            email         = candidate.email or f"hire_{candidate_id}@company.com",
+            password_hash = generate_password_hash("password123"),
+            salary        = candidate.salary or "N/A",
+            experience    = candidate.experience or "0 years",
+            skills        = candidate.skills or "",
+            status        = "Active"
+        )
+        db.session.add(new_employee)
 
-    candidate.interview_status = "Invited"
+    candidate.interview_status = "Hired"
     db.session.commit()
 
-    FRONTEND_URL  = os.getenv("FRONTEND_URL", "https://hrms-ai-5.vercel.app")
-    interview_url = f"{FRONTEND_URL}/interview/{candidate.interview_token}"
+    return jsonify({
+        "message":   f"{candidate.name} has been hired and added to employees.",
+        "candidate": candidate.to_dict()
+    }), 200
 
-    try:
-        send_email(
-            to_address = target_email,
-            subject    = f"Technical Assessment Invitation - {candidate.role or 'Open Position'}",
-            body       = f"""Dear {candidate.name},
 
-Congratulations! The hiring team has moved your profile forward for the {candidate.role or 'open'} position.
+@app.route("/candidates/<int:candidate_id>/reject", methods=["POST"])
+def reject_candidate(candidate_id):
+    candidate = db.session.get(Candidate, candidate_id)
+    if not candidate:
+        return jsonify({"error": "Candidate not found"}), 404
 
-Please use the secure link below to start your AI technical assessment:
-{interview_url}
-
-Best regards,
-HR Operations Team"""
-        )
-    except Exception as email_err:
-        candidate.interview_status = "Pending"
-        db.session.commit()
-        return jsonify({"error": f"Email failed: {str(email_err)}"}), 500
+    candidate.interview_status = "Rejected"
+    db.session.commit()
 
     return jsonify({
-        "message":       "Candidate invited successfully.",
-        "candidate":     candidate.to_dict(),
-        "interviewLink": interview_url
+        "message":   f"{candidate.name} has been rejected.",
+        "candidate": candidate.to_dict()
     }), 200
 
 @app.route("/interview/<string:token>/start", methods=["GET"])
